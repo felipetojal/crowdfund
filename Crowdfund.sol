@@ -1,19 +1,19 @@
 //SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.26;
 
-error InvalidTargetAmount(address sender);
-error InvalidDuration(address sender);
-
 contract Crowdfund {
-    uint256 campaignId;
-    uint256 pledgeId;
+    uint256 campaign_id;
     address owner;
 
     constructor() {
-        campaignId = 0;
-        pledgeId = 0;
+        campaign_id = 0;
         owner = msg.sender;
     }
+
+    error InvalidAmount(address sender);
+    error InvalidDuration(address sender);
+    error CampaignNotFound(address sender, uint256 id);
+    error CampaignIsInactive(address sender, uint256 id);
 
     event CampaignStarted(
         address owner,
@@ -22,16 +22,16 @@ contract Crowdfund {
         uint256 startAt,
         uint256 indexed endAt
     );
+    event PledgeCreated(
+        address indexed owner,
+        uint256 indexed campaignId,
+        uint256 amount
+    );
 
+    // Maps each id to a campaign
     mapping(uint256 => Campaign) public campaigns;
-    mapping(uint256 => Pledge) public pledges;
-
-    struct Pledge {
-        uint256 pledgeId;
-        uint256 campaignId;
-        uint256 amount;
-        address owner;
-    }
+    // Maps each id to an address that has pledged to a campaign
+    mapping(uint256 => mapping(address => uint256)) public pledges;
 
     struct Campaign {
         uint256 id;
@@ -40,33 +40,55 @@ contract Crowdfund {
         uint256 current;
         uint256 startAt;
         uint256 endAt;
-        bool active;
     }
 
-    function startCampaign(uint256 _target, uint256 _duration) public {
-        campaignId += 1;
+    function createPledge(uint256 _campaign_id) public payable {
+        Campaign storage campaign = campaigns[_campaign_id];
 
-        // Checking the parameters
-        if (_target == 0) {
-            revert InvalidTargetAmount(msg.sender);
+        if (campaign.target == 0) {
+            revert CampaignNotFound(msg.sender, _campaign_id);
         }
-        if (_duration == 0) {
+        if (msg.value == 0) {
+            revert InvalidAmount(msg.sender);
+        }
+        if (block.timestamp > campaign.endAt) {
+            revert CampaignIsInactive(msg.sender, _campaign_id);
+        }
+
+        pledges[_campaign_id][msg.sender] += msg.value;
+        campaign.current += msg.value;
+
+        emit PledgeCreated(msg.sender, campaign.id, msg.value);
+    }
+
+    function startCampaign(uint256 _target, uint256 _durationDays) public {
+        campaign_id += 1;
+
+        if (_target == 0) {
+            revert InvalidAmount(msg.sender);
+        }
+        if (_durationDays < 1) {
             revert InvalidDuration(msg.sender);
         }
 
         uint256 _startAt = block.timestamp;
-        uint256 _endAt = _startAt + _duration;
+        uint256 _endAt = _startAt + (_durationDays * 1 days);
 
-        campaigns[campaignId] = Campaign({
-            id: campaignId,
+        campaigns[campaign_id] = Campaign({
+            id: campaign_id,
             owner: msg.sender,
             target: _target,
             current: 0,
             startAt: _startAt,
-            endAt: _endAt,
-            active: true
+            endAt: _endAt
         });
 
-        emit CampaignStarted(owner, campaignId, _target, _startAt, _endAt);
+        emit CampaignStarted(
+            msg.sender,
+            campaign_id,
+            _target,
+            _startAt,
+            _endAt
+        );
     }
 }
